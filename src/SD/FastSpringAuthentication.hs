@@ -2,19 +2,22 @@ module SD.FastSpringAuthentication
     ( fastSpringAuthentication
     ) where
 
-import qualified Control.Monad          as MO
-import qualified Crypto.Hash.MD5        as HM
-import qualified Data.ByteString        as B
-import qualified Data.ByteString.Base16 as BB
-import qualified Data.List              as L
-import qualified Data.Maybe             as DM
-import qualified Data.Map.Strict        as M
-import qualified Data.Text.Encoding     as TE
-import qualified Data.Text.ICU          as TI
-import qualified Snap.Core              as SC
+import           Control.Monad          (guard)
+import           Crypto.Hash.MD5        (hash)
+import           Data.ByteString        (ByteString, append)
+import qualified Data.ByteString        as B (concat, length)
+import           Data.ByteString.Base16 (encode)
+import           Data.List              (foldl', sortBy)
+import           Data.Maybe             (mapMaybe)
+import           Data.Map.Strict        (Map, fromList, toList)
+import qualified Data.Map.Strict        as M (lookup)
+import           Data.Text.Encoding     (decodeUtf8')
+import           Data.Text.ICU          (CompareOption (CompareIgnoreCase))
+import qualified Data.Text.ICU          as TI (compare)
+import           Snap.Core              (urlDecode)
 
-type SharedSecret = B.ByteString -- The “private key.”
-type POSTParams = M.Map B.ByteString [B.ByteString]
+type SharedSecret = ByteString -- The “private key.”
+type POSTParams = Map ByteString [ByteString]
 
 fastSpringAuthentication :: SharedSecret -> POSTParams -> Bool
 fastSpringAuthentication sharedSecret postParams =
@@ -24,47 +27,47 @@ fastSpringAuthentication sharedSecret postParams =
 
 fastSpringAuthMaybe :: SharedSecret -> POSTParams -> Maybe Bool
 fastSpringAuthMaybe sharedSecret postParams = do
-    let sortedParams = sortWithKeys . consolidateValues $ M.toList postParams
+    let sortedParams = sortWithKeys . consolidateValues $ toList postParams
     md5Hash <- listLookup "security_request_hash" sortedParams
-    MO.guard $ B.length md5Hash == 32
+    guard $ B.length md5Hash == 32
     let filteredParams = filter (\(k, _) -> k `compareBS`
                                             "security_request_hash" /= EQ)
                                 sortedParams
     let concatData = (concatValues . urlDecodeValues $ filteredParams)
-                         `B.append` sharedSecret
-    let md5Hash' = BB.encode . HM.hash $ concatData
-    MO.guard $ B.length md5Hash' == 32
-    MO.guard $ compareBS md5Hash md5Hash' == EQ
+                         `append` sharedSecret
+    let md5Hash' = encode . hash $ concatData
+    guard $ B.length md5Hash' == 32
+    guard $ compareBS md5Hash md5Hash' == EQ
     return True
 
 listLookup :: Ord k => k -> [(k, v)] -> Maybe v
-listLookup k l = M.lookup k (M.fromList l)
+listLookup k l = M.lookup k (fromList l)
 
-concatValues :: [(a, B.ByteString)] -> B.ByteString
-concatValues l = L.foldl' lambda "" l
-   where lambda accum (_, bs) = accum `B.append` bs
+concatValues :: [(a, ByteString)] -> ByteString
+concatValues l = foldl' lambda "" l
+   where lambda accum (_, bs) = accum `append` bs
 
-urlDecodeValues :: [(a, B.ByteString)] -> [(a, B.ByteString)]
-urlDecodeValues l = DM.mapMaybe func l
-    where func (k, bs) = case SC.urlDecode bs of
+urlDecodeValues :: [(a, ByteString)] -> [(a, ByteString)]
+urlDecodeValues l = mapMaybe func l
+    where func (k, bs) = case urlDecode bs of
                              Nothing      -> Nothing
                              Just decoded -> Just (k, decoded)
 
-consolidateValues :: [(B.ByteString, [B.ByteString])]
-                         -> [(B.ByteString, B.ByteString)]
+consolidateValues :: [(ByteString, [ByteString])]
+                         -> [(ByteString, ByteString)]
 consolidateValues = map (\(key, values) -> (key, B.concat values))
 
-sortWithKeys :: [(B.ByteString, B.ByteString)] -> [(B.ByteString, B.ByteString)]
-sortWithKeys = L.sortBy compareFst
+sortWithKeys :: [(ByteString, ByteString)] -> [(ByteString, ByteString)]
+sortWithKeys = sortBy compareFst
 
-compareFst :: (B.ByteString, a) -> (B.ByteString, a) -> Ordering
+compareFst :: (ByteString, a) -> (ByteString, a) -> Ordering
 compareFst t1 t2 = compareBS (fst t1) (fst t2)
 
-compareBS :: B.ByteString -> B.ByteString -> Ordering
+compareBS :: ByteString -> ByteString -> Ordering
 compareBS bs1 bs2 =
-    let eText1 = TE.decodeUtf8' bs1
-        eText2 = TE.decodeUtf8' bs2
+    let eText1 = decodeUtf8' bs1
+        eText2 = decodeUtf8' bs2
         in case (eText1, eText2) of
-            (Right text1, Right text2) ->  TI.compare [TI.CompareIgnoreCase]
+            (Right text1, Right text2) ->  TI.compare [CompareIgnoreCase]
                                                       text1 text2
             _ -> EQ
