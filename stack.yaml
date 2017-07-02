@@ -1,1 +1,7 @@
 resolver: lts-8.15
+
+# https://stackoverflow.com/questions/7420514/using-text-icu-library-in-haskell-on-mac-os
+extra-include-dirs:
+    - /usr/local/opt/icu4c/include
+extra-lib-dirs:
+    - /usr/local/opt/icu4c/lib
